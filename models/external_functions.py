@@ -402,8 +402,17 @@ class VGG19(torch.nn.Module):
         # don't need the gradients, just want the features
         for param in self.parameters():
             param.requires_grad = False
+            
+        # vgg19 pretrained stats
+        self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
+        self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
 
-    def forward(self, x):
+    def forward(self, x, apply_stat: bool = True):
+        if apply_stat:
+            #change stats to vgg
+            x = (x + 1)/2 # [-1, 1] => [0, 1]
+            x = (x - self.mean)/self.std
+        
         relu1_1 = self.relu1_1(x)
         relu1_2 = self.relu1_2(relu1_1)
 
