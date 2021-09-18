@@ -213,6 +213,12 @@ class BaseModel(ABC):
             print_img = torch.cat(print_img, 2)
             print_img = (print_img + 1) / 2.0
             self.writer.add_images('examples' + name, print_img[:8], step)
+        
+        # save lr
+        if hasattr(self,'optimizer_D'):
+            self.writer.add_scalar('lr_D',self.optimizer_D.param_groups[0]['lr'],step)
+        self.writer.add_scalar('lr_G',self.optimizer_G.param_groups[0]['lr'],step)
+
 
         # numbers
         if self.isTrain:

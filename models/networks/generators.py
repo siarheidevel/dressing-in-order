@@ -81,11 +81,14 @@ class DIORGenerator(BaseGenerator):
         base = out
         self.base = base
 
-        for i in range(len(g_attns)): 
+        for i in range(len(g_attns)):
             attn = g_attns[i]
             curr_mask = (attn > alpha).float().detach()
-            N = curr_mask.size(0)
+            # N = curr_mask.size(0)
+            N,C,H,W = curr_mask.size()
             exists = torch.sum(curr_mask.view(N,-1), 1)
+            # exists_threshold = H*W *0.005
+            # exists = (exists > exists_threshold)[:,None,None,None].float()
             exists = (exists > 0)[:,None,None,None].float()
             
             attn = exists * curr_mask * attn # * fattn

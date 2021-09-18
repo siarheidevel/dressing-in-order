@@ -170,7 +170,7 @@ class DIORBaseModel(BaseModel):
         
         real_AB = torch.cat((self.to_parse2, self.to_img), 1)
         pred_real = self.netD_content(real_AB)
-        self.loss_D_real_content = self.criterionGAN(pred_real, True)  * self.loss_coe['GAN']  
+        self.loss_D_real_content = self.criterionGAN(pred_real, True)  * self.loss_coe['GAN']
         return (self.loss_D_fake_content + self.loss_D_real_content) / 0.5
         
     def backward_G(self):

@@ -62,7 +62,7 @@ def main():
             model, dataset, visual_ds = progressive_adjust(model, opt, bs, cs, coe, square=opt.square) 
         
                 
-    
+    # total_iters =-1
     # train
     epoch_start_time = time.time()  # timer for entire epoch
     while total_iters < opt.n_epochs + opt.n_epochs_decay + 1: 

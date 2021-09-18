@@ -19,13 +19,13 @@ class DIORModel(DIORBaseModel):
             
         if opt.netG in ['adseq2']:
             self.netE_attr.module.reduced = True
-       
         self.warmup = opt.warmup
             
     def modify_commandline_options(parser, is_train):
         DIORBaseModel.modify_commandline_options(parser, is_train)
         parser.add_argument('--flownet_path', type=str, default="", help='')
         parser.add_argument('--loss_coe_seg', type=float, default=0.1, help='coefficient of cls loss')
+        parser.add_argument('--loss_coe_context', type=float, default=0.1, help='coefficient of contextual loss')
         parser.add_argument('--loss_coe_flow_reg', type=float, default=0.001, help='coefficient of cls loss')
         parser.add_argument('--loss_coe_flow_cor', type=float, default=2, help='coefficient of cls loss')
         parser.add_argument('--frozen_flownet', action="store_true", help='coefficient of cls loss')
@@ -40,13 +40,18 @@ class DIORModel(DIORBaseModel):
         super()._init_loss(opt)
         if self.isTrain:
             self.criterionVGG = external_functions.VGGLoss().to(self.device)
+            self.contextSimlilarity =external_functions.ContextSimilarityLoss().to(self.device)
             
             self.loss_coe['seg'] = opt.loss_coe_seg
             self.loss_coe['flow_reg'] = 0
             self.loss_coe['flow_cor'] = 0
+            if opt.loss_coe_context > 0:
+                self.loss_coe['context'] = opt.loss_coe_context
+                self.loss_names += ['context']
 
             if opt.loss_coe_seg > 0:
                 self.loss_names += ['seg']
+                self.visual_names += ['seg']
                 self.criterionCE = nn.BCELoss()
 
             if not opt.frozen_flownet:
@@ -91,7 +96,7 @@ class DIORModel(DIORBaseModel):
             sid = range(self.n_human_parts)
         for i in sid:
             mask =  (parse == i).float().unsqueeze(1)
-            crop = img * mask
+            crop = img * mask#from PIL import Image; Image.fromarray((127*np.transpose(crop[0].cpu().numpy(),(1,2,0)) + 127 ).astype(np.uint8)).save('masked.png')
             fmap, fmask = self.netE_attr.module.enc_seg(crop, self.flow_fields[-1], self.netVGG)           
             ret.append((fmap, fmask))
         return ret
@@ -100,9 +105,9 @@ class DIORModel(DIORBaseModel):
         _,_,H,W = img.size()
         imgs = []
         for im in img:
-            mask = Masks.get_ff_mask(H,W)
+            mask = Masks.get_ff_mask(H,W)#from PIL import Image; Image.fromarray((255*mask).astype(np.uint8)).save('mask.png')
             mask = torch.from_numpy(mask).unsqueeze(0).to(img.device).float()
-            imgs += [(im * (1 - mask)).unsqueeze(0)]
+            imgs += [(im * (1 - mask)).unsqueeze(0)]#from PIL import Image; Image.fromarray((127*np.transpose((im * (1 - mask)).cpu().numpy(),(1,2,0)) + 127 ).astype(np.uint8)).save('masked.png')
         img = torch.cat(imgs)
         return img
     
@@ -124,8 +129,8 @@ class DIORModel(DIORBaseModel):
                 self.fake_B = self.netG.module.to_rgb(z)
                 return 
             else:
-                psegs = self.encode_attr(self.from_img, self.from_parse, self.from_kpt, self.to_kpt, PID)
-                gsegs = self.encode_attr(self.from_img, self.from_parse, self.from_kpt, self.to_kpt, GID)
+                psegs = self.encode_attr(img, self.to_parse, self.to_kpt, self.to_kpt, PID)
+                gsegs = self.encode_attr(img, self.to_parse, self.to_kpt, self.to_kpt, GID)
                 self.attn = [b for a,b in gsegs] + [b for a,b in psegs]
                 self.fake_B = self.netG(self.to_kpt, psegs, gsegs)
                 
@@ -137,7 +142,7 @@ class DIORModel(DIORBaseModel):
     
     def compute_visuals(self, step, loss_only=False):
         if 'seg' in self.visual_names:
-            self.seg = torch.argmax(self.attn, 1).detach()
+            self.seg = torch.argmax(torch.cat(self.attn,1), 1).detach()
             self.seg = functions.assign_color(self.seg, self.n_human_parts)
         super().compute_visuals(step, loss_only)
     
@@ -169,6 +174,11 @@ class DIORModel(DIORBaseModel):
         self.loss_per = self.loss_per * self.loss_coe['per']
         self.loss_sty = self.loss_sty * self.loss_coe['sty']
         self.loss_G = self.loss_G + self.loss_per + self.loss_sty
+
+        #context loss
+        if self.loss_coe['context'] > 0:
+            self.loss_context = self.contextSimlilarity(real_B, fake_B) * self.loss_coe['context']
+            self.loss_G = self.loss_G + self.loss_context
 
         # additional loss
         self.loss_G = self.loss_G + self.compute_seg_loss()

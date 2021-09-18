@@ -135,6 +135,7 @@ class ADGANEncoder(nn.Module):
         if not frozen_flownet:
             from models.networks.block_extractor.block_extractor import BlockExtractor
             self.extractor = BlockExtractor(kernel_size=1)
+            # self.extractor = BlockExtractor(kernel_size=3)
         else:
             from utils.train_utils import torch_transform
             self.extractor = torch_transform

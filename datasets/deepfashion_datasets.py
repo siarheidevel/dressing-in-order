@@ -103,7 +103,7 @@ class DFPairDataset(data.Dataset):
         from_key, to_key = self.name_pairs[index]
         from_img, from_kpt, from_parse = self.get_to_item(from_key)
         to_img, to_kpt, to_parse = self.get_to_item(to_key)
-            
+        # Image.fromarray((np.transpose(from_img,(1,2,0)).numpy()*127+127).astype(np.uint8),'RGB').save('image.jpg');Image.fromarray(from_parse.numpy()*20).save('maskk.png')
         return from_img, from_kpt, from_parse, to_img, to_kpt, to_parse, index #torch.Tensor([0])
         
     

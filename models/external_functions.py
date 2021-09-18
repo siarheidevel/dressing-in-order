@@ -326,6 +326,107 @@ class PerceptualCorrectness(nn.Module):
         input_sample = F.grid_sample(source, grid).view(b, c, -1)
         return input_sample
 
+
+class ContextSimilarityLoss(nn.Module):
+    '''
+    https://github.com/roimehrez/contextualLoss/blob/master/CX/CX_distance.py
+    cosine similarity implementation
+    '''
+    def __init__(self, sigma=0.5, b=1.0):
+        super(ContextSimilarityLoss, self).__init__()
+        self.add_module('vgg', VGG19())
+        self.sigma = sigma
+        self.b = b
+
+    def center_by_T(self, featureI, featureT):
+        # Calculate mean channel vector for feature map.
+        meanT = featureT.mean(0, keepdim=True).mean(2, keepdim=True).mean(3, keepdim=True)
+        return featureI - meanT, featureT - meanT
+
+    def l2_normalize_channelwise(self, features):
+        # Normalize on channel dimension (axis=1)
+        norms = features.norm(p=2, dim=1, keepdim=True)
+        features = features.div(norms)
+        return features
+
+    def patch_decomposition(self, features):
+        N, C, H, W = features.shape
+        assert N == 1
+        P = H * W
+        # NCHW --> 1x1xCxHW --> HWxCx1x1
+        patches = features.view(1, 1, C, P).permute((3, 2, 0, 1))
+        return patches
+
+    def calc_relative_distances(self, raw_dist, axis=1):
+        epsilon = 1e-5
+        div = torch.min(raw_dist, dim=axis, keepdim=True)[0]
+        relative_dist = raw_dist / (div + epsilon)
+        return relative_dist
+
+    def calc_CX(self, dist, axis=1):
+        W = torch.exp((self.b - dist) / self.sigma)
+        W_sum = W.sum(dim=axis, keepdim=True)
+        return W.div(W_sum)
+
+    def feature_loss(self, featureT, featureI):
+        '''
+        :param featureT: target
+        :param featureI: inference
+        :return:
+        '''
+        # NCHW
+        # print(featureI.shape)
+
+        featureI, featureT = self.center_by_T(featureI, featureT)
+
+        featureI = self.l2_normalize_channelwise(featureI)
+        featureT = self.l2_normalize_channelwise(featureT)
+
+        dist = []
+        N = featureT.size()[0]
+        for i in range(N):
+            # NCHW
+            featureT_i = featureT[i, :, :, :].unsqueeze(0)
+            # NCHW
+            featureI_i = featureI[i, :, :, :].unsqueeze(0)
+            featureT_patch = self.patch_decomposition(featureT_i)
+            # Calculate cosine similarity
+            # See the torch document for functional.conv2d
+            dist_i = F.conv2d(featureI_i, featureT_patch)
+            dist.append(dist_i)
+
+        # NCHW
+        dist = torch.cat(dist, dim=0)
+
+        raw_dist = (1. - dist) / 2.
+
+        relative_dist = self.calc_relative_distances(raw_dist)
+
+        CX = self.calc_CX(relative_dist)
+
+        CX = CX.max(dim=3)[0].max(dim=2)[0]
+        CX = CX.mean(1)
+        CX = -torch.log(CX)
+        CX = torch.mean(CX)
+        return CX
+    
+    def __call__(self, x, y, layers = ['relu3_2','relu4_2']):
+        # Compute features
+        x_vgg, y_vgg = self.vgg(x), self.vgg(y)
+        
+        # layers = ['relu4_2']
+        cx_style_loss = 0
+        for layer in layers:
+            featureT, featureI = x_vgg[layer], y_vgg[layer]
+            if 'relu2_2'==layer:
+                # featureI = featureI[:,:,::2,::2]
+                # featureT = featureT[:,:,::2,::2]
+                featureI = nn.AvgPool2d(2)(featureI)
+                featureT = nn.AvgPool2d(2)(featureT)
+            cx_style_loss += self.feature_loss(featureT, featureI)
+        return cx_style_loss
+
+
 class VGG19(torch.nn.Module):
     def __init__(self):
         super(VGG19, self).__init__()
@@ -402,8 +503,16 @@ class VGG19(torch.nn.Module):
         # don't need the gradients, just want the features
         for param in self.parameters():
             param.requires_grad = False
+        
+        self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
+        self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
 
-    def forward(self, x):
+    def forward(self, x, apply_stat: bool = True):
+        if apply_stat:
+            #change stats to vgg
+            x = (x + 1)/2 # [-1, 1] => [0, 1]
+            x = (x - self.mean)/self.std
+
         relu1_1 = self.relu1_1(x)
         relu1_2 = self.relu1_2(relu1_1)
 
