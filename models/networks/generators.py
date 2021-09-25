@@ -33,20 +33,23 @@ class DIORGenerator(BaseGenerator):
         mask = [b for a,b in psegs]
         
         N,C,_,_ = styles[0].size()
-        style_skin = sum(styles).view(N,C,-1).sum(-1)
+        # style_skin = sum(styles).view(N,C,-1).sum(-1)
+        style_skin = sum(styles[1:]).view(N,C,-1).sum(-1)
         
         N,C,_,_ = mask[0].size()
-        human_mask = sum(mask).float().detach()
+        # human_mask = sum(mask).float().detach()
+        human_mask = sum(mask[1:]).float().detach()
         area = human_mask.view(N,C,-1).sum(-1) + 1e-5
         style_skin = (style_skin / area)[:,:,None,None]
         
-        full_human_mask = sum([m.float() for m in mask[1:] + gmask]).detach() 
-        full_human_mask = (full_human_mask > 0).float()
+        full_human_mask = sum([m.float() for m in mask[1:] + gmask]).detach()
+        # full_human_mask = (full_human_mask > 0).float()
+        full_human_mask = (full_human_mask > 0.5).float().detach()
         style_human =  style_skin * full_human_mask # + styles[0]
         style_human = self.fusion(torch.cat([style_human, full_human_mask], 1))
         style_bg = self.fusion(torch.cat([styles[0], mask[0]], 1))        
         style = style_human * full_human_mask + (1 - full_human_mask) * style_bg 
-        
+        # from PIL import Image; Image.fromarray(((full_human_mask > 0.5)[0,0].float().cpu().numpy()*255).astype(np.uint8)).save('human_mask.png')
         return style
 
 
@@ -57,13 +60,16 @@ class DIORGenerator(BaseGenerator):
         attns = [b for a,b in gsegs]
         
         for s,attn in zip(styles, attns):
-            attn = (attn > alpha).float().detach()
-            s = F.interpolate(s, (attn.size(2), attn.size(3)))
+            mask = (attn > alpha).float().detach()
+            # import numpy as np;from PIL import Image; Image.fromarray((255*attn[0,0].cpu().numpy()).astype(np.uint8)).save('attn.png')
+            # s = F.interpolate(s, (attn.size(2), attn.size(3)))
             N,C,H,W = s.size()
-            mean_s = s.view(N,C,-1).mean(-1).unsqueeze(-1).unsqueeze(-1)
+            # mean_s = s.view(N,C,-1).mean(-1).unsqueeze(-1).unsqueeze(-1)
+            sum_mask = mask.view(N,1,-1).sum(-1).detach()
+            mean_s = ((s*mask).view(N,C,-1).sum(-1)/(sum_mask + 1e-5)).unsqueeze(-1).unsqueeze(-1)
             s = s + mean_s
             s = self.fusion(torch.cat([s, attn], 1))
-            s = s * attn
+            s = s * mask
             ret.append(s)
             
         return ret, attns

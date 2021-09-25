@@ -7,7 +7,7 @@ import os
 import argparse
 
 import torch.nn as nn
-
+from datasets.custom_dataset import SEG, get_palette
 COLORS = np.array([
     [255,255,255], [66,135,245], [245,90,66], [245,206,66],
     [209,245,66], [105,245,66], [129,66,245], [245,66,203],
@@ -26,6 +26,7 @@ def assign_color(mask, n_labels):
         mask = mask.sequeeze()
     N,H,W = mask.size()
     ret = []
+    COLORS = np.array(get_palette(n_labels)).reshape(-1,3)
     for i in range(n_labels):
         curr_parse = []
         for j in range(3):

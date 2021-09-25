@@ -3,9 +3,16 @@ import torch.nn.functional as F
 from tqdm import tqdm
 import numpy as np
 import imageio, os
+from datasets.custom_dataset import SEG, get_palette
 
 GID = [2,5,1,3]
 PID = [0,4,6,7]
+# bg, face, skin, arm, leg (the first has to be bg and the second has to be face.)
+PID  = [SEG.ID['background'], SEG.ID['face'], SEG.ID['skin'], SEG.ID['arm'], SEG.ID['leg']] 
+
+# hair, shoes, top, bottom, hat
+GID = [SEG.ID['hair'], SEG.ID['shoes'], SEG.ID['pants'], SEG.ID['upper-clothes'], SEG.ID['hat']]
+
 
 def define_visualizer(model_name):
     return FlowVisualizer 
@@ -77,7 +84,7 @@ class FlowVisualizer:
         model.train()
         
     @staticmethod
-    def swap_pose(data, model, gid=5, step=-1, prefix=""):
+    def swap_pose(data, model, step=-1, prefix=""):
         model.eval()
         imgs, parses, from_poses, poses = data
         imgs = imgs.to(model.device)

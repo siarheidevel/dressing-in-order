@@ -4,6 +4,7 @@ This script works for various models (with option '--model': e.g., pix2pix, cycl
 different datasets (with option '--dataset_mode': e.g., aligned, unaligned, single, colorization).
 You need to specify the dataset ('--dataroot'), experiment name ('--name'), and model ('--model').
 """
+from pathlib import Path
 import time
 from options.train_options import TrainOptions
 from datasets import create_dataset, create_visual_ds
@@ -11,6 +12,7 @@ from utils.visualizers import define_visualizer
 from utils.train_utils import *
 from models import create_model
 import os, torch
+from datasets.custom_dataset import PairDataset, SEG, VisualDataset
 
 def generate_val_img(visual_ds, model, opt, step=0):
     model.eval()
@@ -19,7 +21,8 @@ def generate_val_img(visual_ds, model, opt, step=0):
         # patches = visual_ds.get_patches()
         for cata in visual_ds.selected_keys:
             data = visual_ds.get_attr_visual_input(cata)
-            Visualizer.swap_garment(data, model,  prefix=cata, step=step, gid=5)
+            # Visualizer.swap_garment(data, model,  prefix=cata, step=step, gid=5)
+            Visualizer.swap_garment(data, model,  prefix=cata, step=step, gid=SEG.ID['upper-clothes'])
             print("[visualize] swap garments - %s" % cata)
             #Visualizer.swap_texture(data, patches, model,  prefix=cata, step=step)
             #print("[visualize] swap textures - %s" % cata)
@@ -37,10 +40,17 @@ def main():
     else:
         opt.crop_size = (opt.crop_size, opt.crop_size)
     opt.square = False
-    dataset = create_dataset(opt)  # create a dataset given opt.dataset_mode and other options
+    # dataset = create_dataset(opt)  # create a dataset given opt.dataset_mode and other options
+    dataset = PairDataset(opt)
+    dataset = torch.utils.data.DataLoader(dataset, batch_size=opt.batch_size, shuffle=(opt.phase == 'train'), num_workers=opt.n_cpus, pin_memory=True)
     dataset_size = len(dataset)    # get the number of images in the dataset.
     print('The number of training images = %d' % dataset_size)
-    visual_ds = create_visual_ds(opt)
+    # for i,data in enumerate(dataset):
+    #     # data = next(dataset_iter)
+    #     print(i)
+    #     if i>10:break
+    # visual_ds = create_visual_ds('PairDataset')
+    visual_ds = VisualDataset(Path('/home/deeplab/datasets/deepfashion/diordataset_custom/standard_test_anns.txt'))
     
     # set up model
     model = create_model(opt)      # create a model given opt.model and other options
@@ -60,7 +70,7 @@ def main():
             bs, cs, coe = progressive_steps[keys[curr_step]]
             print("[progressive] init - iter %d, bs: %d, crop: %d" % (total_iters, bs, cs))
             model, dataset, visual_ds = progressive_adjust(model, opt, bs, cs, coe, square=opt.square) 
-        
+    # generate_val_img(visual_ds, model, opt, step=total_iters)    
                 
     # total_iters =-1
     # train
@@ -91,7 +101,13 @@ def main():
                 for loss_name in losses:
                     out_string += "%s: %.4f, " % (loss_name, losses[loss_name])
                 print(out_string)
-                
+
+            # tensorboard
+            if total_iters % opt.display_freq == 0:   #
+                model.compute_visuals(total_iters, loss_only=False)
+                if opt.run_test:
+                    generate_val_img(visual_ds, model, opt, step=total_iters)
+                print("at %d, compute visuals" % total_iters)                
            
             # save latest ckpt  
             if total_iters % opt.save_latest_freq == 0:   # cache our latest model every <save_latest_freq> iterations
@@ -105,12 +121,7 @@ def main():
                 save_suffix = 'iter_%d' % total_iters 
                 model.save_networks(save_suffix)
             
-            # tensorboard
-            if total_iters % opt.display_freq == 0:   #
-                model.compute_visuals(total_iters, loss_only=False)
-                if opt.run_test:
-                    generate_val_img(visual_ds, model, opt, step=total_iters)
-                print("at %d, compute visuals" % total_iters)
+            
                 
             # update learning rate
             if total_iters % opt.lr_update_unit == 0:
