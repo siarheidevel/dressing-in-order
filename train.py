@@ -50,7 +50,7 @@ def main():
     #     print(i)
     #     if i>10:break
     # visual_ds = create_visual_ds('PairDataset')
-    visual_ds = VisualDataset(Path('/home/deeplab/datasets/deepfashion/diordataset_custom/standard_test_anns.txt'))
+    visual_ds = VisualDataset(Path('/home/deeplab/datasets/deepfashion/diordataset_custom/standard_test_anns.txt'), dim = opt.crop_size)
     
     # set up model
     model = create_model(opt)      # create a model given opt.model and other options
@@ -85,7 +85,7 @@ def main():
             # model update
             model.set_input(data)         # unpack data from dataset and apply preprocessing
             model.optimize_parameters()   # calculate loss functions, get gradients, update network weights
-            
+            # generate_val_img(visual_ds, model, opt, step=total_iters) 
             # progressive adjust
             if opt.progressive and (total_iters - 1) in progressive_steps:
                 bs, cs, coe = progressive_steps[total_iters - 1]
