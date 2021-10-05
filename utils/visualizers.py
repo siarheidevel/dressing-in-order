@@ -4,7 +4,7 @@ from tqdm import tqdm
 import numpy as np
 import imageio, os
 from datasets.custom_dataset import SEG, get_palette
-
+import utils.util as functions
 GID = [2,5,1,3]
 PID = [0,4,6,7]
 # bg, face, skin, arm, leg (the first has to be bg and the second has to be face.)
@@ -54,7 +54,11 @@ class FlowVisualizer:
             if display_mask:
                 # import pdb; pdb.set_trace()
                 N,C,H,W = imgs.size()
-                all_mask += [model.get_seg_visual(gid).expand(N,3,H,W)[None]]
+                segm_m = [functions.upsampling(attn, H, W) for attn in [b for a,b in gsegs] + [b for a,b in psegs]]
+                segm_max = torch.argmax(torch.cat(segm_m,1), 1)
+                segm_color =functions.assign_color(segm_max, model.n_human_parts)
+                all_mask += [segm_color[None]]
+                # all_mask += [model.get_seg_visual(gid).expand(N,3,H,W)[None]]
 
         # display
         all_fake = torch.cat(all_fake)
@@ -84,7 +88,7 @@ class FlowVisualizer:
         model.train()
         
     @staticmethod
-    def swap_pose(data, model, step=-1, prefix=""):
+    def swap_pose(data, model, step=-1, prefix="", display_mask=False):
         model.eval()
         imgs, parses, from_poses, poses = data
         imgs = imgs.to(model.device)
@@ -108,6 +112,15 @@ class FlowVisualizer:
             pivot_img = F.interpolate(img[None], (h,w))
             print_img = (torch.cat([pivot_img, fake]) + 1) / 2
             print_img = print_img.float().cpu().detach()
+            if display_mask:
+                # import pdb; pdb.set_trace()
+                N,C,H,W = fake.size()
+                segm_m = [functions.upsampling(attn, H, W) for attn in [b for a,b in gsegs] + [b for a,b in psegs]]
+                segm_max = torch.argmax(torch.cat(segm_m,1), 1)
+                segm_max=torch.cat((parse[None],segm_max),0)
+                segm_color =functions.assign_color(segm_max, model.n_human_parts).cpu()
+                print_img = torch.cat((print_img,segm_color),2)
+                
             if step >= 0:
                 curr_step = step
                 model.writer.add_images("swap pose %d %s" % (i, prefix), print_img, curr_step)

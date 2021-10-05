@@ -271,19 +271,19 @@ class VisualDataset(data.Dataset):
     def get_all_pose(self, key, std_pose=True):
         if std_pose:
             return self.standard_poses
-        folder_path = os.path.join(self.kpt_dir,key).split("/")
-        prefix = folder_path[-1]
-        folder_path = "/".join(folder_path[:-1])
-        ret = []
+        # folder_path = os.path.join(self.kpt_dir,key).split("/")
+        # prefix = folder_path[-1]
+        # folder_path = "/".join(folder_path[:-1])
+        # ret = []
         
-        for fn in os.listdir(folder_path):
-            if fn.startswith(prefix) and fn.endswith('_kpt.npy'):
-                curr = self._load_kpt(os.path.join(folder_path, fn[:-8]))   
-                ret.append(curr[None])
+        # for fn in os.listdir(folder_path):
+        #     if fn.startswith(prefix) and fn.endswith('_kpt.npy'):
+        #         curr = self._load_kpt(os.path.join(folder_path, fn[:-8]))   
+        #         ret.append(curr[None])
             
-        if len(ret) < 2:
-            return self.standard_poses
-        return torch.cat(ret)
+        # if len(ret) < 2:
+        #     return self.standard_poses
+        # return torch.cat(ret)
 
     
     
@@ -297,7 +297,7 @@ class VisualDataset(data.Dataset):
         for key in keys:
             curr_key = key# + view_postfix
             curr_from, curr_from_kpt, curr_parse = self.load_data(str(self.dataroot/curr_key))
-            all_from_kpts += [curr_from_kpt]
+            all_from_kpts += [curr_from_kpt.unsqueeze(0)]
             curr_kpt = self.get_all_pose(key, std_pose=std_pose)
             all_kpts += [curr_kpt]
             all_froms += [curr_from.unsqueeze(0)]

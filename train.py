@@ -14,7 +14,7 @@ from models import create_model
 import os, torch
 from datasets.custom_dataset import PairDataset, SEG, VisualDataset
 
-def generate_val_img(visual_ds, model, opt, step=0):
+def generate_val_img(visual_ds, model, opt, step=0,garment_id=SEG.ID['upper-clothes'],  display_mask =False):
     model.eval()
     Visualizer = define_visualizer(opt.model)
     with torch.no_grad():
@@ -22,14 +22,14 @@ def generate_val_img(visual_ds, model, opt, step=0):
         for cata in visual_ds.selected_keys:
             data = visual_ds.get_attr_visual_input(cata)
             # Visualizer.swap_garment(data, model,  prefix=cata, step=step, gid=5)
-            Visualizer.swap_garment(data, model,  prefix=cata, step=step, gid=SEG.ID['upper-clothes'])
+            Visualizer.swap_garment(data, model,  prefix=cata, step=step, gid=garment_id,display_mask=display_mask)
             print("[visualize] swap garments - %s" % cata)
             #Visualizer.swap_texture(data, patches, model,  prefix=cata, step=step)
             #print("[visualize] swap textures - %s" % cata)
         
         data = visual_ds.get_pose_visual_input("mixed")
         #import pdb; pdb.set_trace()
-        Visualizer.swap_pose(data, model,  prefix="mixed", step=step)
+        Visualizer.swap_pose(data, model,  prefix="mixed", step=step,display_mask=display_mask)
         print("[visualize] swap poses")
     model.train()
         
@@ -42,7 +42,8 @@ def main():
     opt.square = False
     # dataset = create_dataset(opt)  # create a dataset given opt.dataset_mode and other options
     dataset = PairDataset(opt)
-    dataset = torch.utils.data.DataLoader(dataset, batch_size=opt.batch_size, shuffle=(opt.phase == 'train'), num_workers=opt.n_cpus, pin_memory=True)
+    dataset = torch.utils.data.DataLoader(dataset, batch_size=opt.batch_size, shuffle=(opt.phase == 'train'),
+        num_workers=opt.n_cpus, pin_memory=True, prefetch_factor=10)
     dataset_size = len(dataset)    # get the number of images in the dataset.
     print('The number of training images = %d' % dataset_size)
     # for i,data in enumerate(dataset):
@@ -70,7 +71,7 @@ def main():
             bs, cs, coe = progressive_steps[keys[curr_step]]
             print("[progressive] init - iter %d, bs: %d, crop: %d" % (total_iters, bs, cs))
             model, dataset, visual_ds = progressive_adjust(model, opt, bs, cs, coe, square=opt.square) 
-    # generate_val_img(visual_ds, model, opt, step=total_iters)    
+    generate_val_img(visual_ds, model, opt, step=total_iters,garment_id=SEG.ID['upper-clothes'], display_mask=True)    
                 
     # total_iters =-1
     # train
@@ -94,7 +95,7 @@ def main():
                 break
                 
             # log
-            if total_iters % opt.print_freq == 0:   
+            if total_iters % opt.print_freq == 0:
                 losses = model.get_cum_losses()
                 #t_comp = (time.time() - epoch_start_time) / opt.batch_size
                 out_string = "[%s][iter-%d]" % (opt.name,  total_iters)
