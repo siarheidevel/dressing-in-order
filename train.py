@@ -71,7 +71,7 @@ def main():
             bs, cs, coe = progressive_steps[keys[curr_step]]
             print("[progressive] init - iter %d, bs: %d, crop: %d" % (total_iters, bs, cs))
             model, dataset, visual_ds = progressive_adjust(model, opt, bs, cs, coe, square=opt.square) 
-    generate_val_img(visual_ds, model, opt, step=total_iters,garment_id=SEG.ID['upper-clothes'], display_mask=True)    
+    # generate_val_img(visual_ds, model, opt, step=total_iters,garment_id=SEG.ID['upper-clothes'], display_mask=True)    
                 
     # total_iters =-1
     # train

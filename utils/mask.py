@@ -13,7 +13,7 @@ class Masks:
         if num_v is None:
             num_v = 15+np.random.randint(9) #5
         SEGMENT_LENGTH = int(min(h,w)*0.3)
-        BRUSH_WIDTH = int(min(h,w)*0.1)
+        BRUSH_WIDTH = int(min(h,w)*0.05)
         for i in range(num_v):
             start_x = np.random.randint(w)
             start_y = np.random.randint(h)
@@ -22,7 +22,7 @@ class Masks:
                 if i % 2 == 0:
                     angle = 2 * 3.1415926 - angle
                 length = 10+np.random.randint(SEGMENT_LENGTH) # 40
-                brush_w = 10+np.random.randint(BRUSH_WIDTH) # 10
+                brush_w = BRUSH_WIDTH + np.random.randint(BRUSH_WIDTH) # 10
                 end_x = (start_x + length * np.sin(angle)).astype(np.int32)
                 end_y = (start_y + length * np.cos(angle)).astype(np.int32)
 
