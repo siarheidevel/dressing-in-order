@@ -54,8 +54,8 @@ class PairDataset(data.Dataset):
         super().__init__()
         self.dataroot = opt.dataroot
         self.crop_size = opt.crop_size
-        annotation_index_csv = os.path.join(self.dataroot, 'annotation_index.csv')
-        annotation_pairs_csv = os.path.join(self.dataroot, 'annotation_pairs.csv')
+        annotation_index_csv = os.path.join(self.dataroot, 'annotation_index_qanet.csv')
+        annotation_pairs_csv = os.path.join(self.dataroot, 'annotation_pairs_qanet.csv')
 
         self.do_flip=True
 
@@ -94,16 +94,24 @@ class PairDataset(data.Dataset):
 
 
     def load_data(self, name):
-        seg = np.array(Image.open(name + ".seg3.render.png"))
+        seg = np.array(Image.open(name + ".seg_qanet.render.png"))
         img = cv2.imread(name)[:,:,[2,1,0]]
         pose_y_str,pose_x_str = self.index_df.loc[name][['keypoints_y', 'keypoints_x']].to_list()
         pose_array = pose_utils.load_pose_cords_from_strings(pose_y_str, pose_x_str)
         affine_transform = PairDataset._get_affine_stransform(self.crop_size, img.shape[0],img.shape[1])
 
         dstSize = (self.crop_size[1],self.crop_size[0])
-        resized_img = cv2.warpAffine(cv2.blur(img,(3,3)), affine_transform[:2],dstSize, 
-            flags=cv2.INTER_LINEAR,
-            borderMode=cv2.BORDER_CONSTANT, borderValue=(0,0,0))
+        resized_img = cv2.bilateralFilter(cv2.warpAffine(img, affine_transform[:2],dstSize, 
+            flags=cv2.INTER_AREA,
+            borderMode=cv2.BORDER_CONSTANT, borderValue=(0,0,0)),d=5,sigmaColor=15, sigmaSpace=15).astype(np.uint8)
+        # Image.fromarray(cv2.bilateralFilter(cv2.warpAffine(img, affine_transform[:2],dstSize, 
+        #     flags=cv2.INTER_AREA,
+        #     borderMode=cv2.BORDER_CONSTANT, borderValue=(0,0,0)),d=5,sigmaColor=11, sigmaSpace=24).astype(np.uint8),'RGB').save('image3.jpg')
+        # Image.fromarray(img).resize((352,512), Image.LANCZOS).save('image2.jpg')
+        # Image.fromarray(cv2.warpAffine(img, affine_transform[:2],dstSize, 
+        #         flags=cv2.INTER_CUBIC,
+        #         borderMode=cv2.BORDER_CONSTANT, borderValue=(0,0,0))).save('image.jpg')
+        
         #Image.fromarray(img).transform((176,256), Image.AFFINE, affine_transform[:2].reshape(-1).tolist(),resample=Image.BILINEAR).save('img.png')
         # Image.fromarray(img).resize((176,256), Image.ANTIALIAS).save('img.png') 
         # Image.fromarray(cv2.warpAffine(cv2.blur(img,(2,3)), affine_transform[:2],dstSize, 
@@ -145,7 +153,7 @@ class PairDataset(data.Dataset):
     def _get_affine_stransform(crop_size, img_height, img_width):
         fit_height, fit_width = crop_size[0], crop_size[1]
         center = img_height * 0.5 + 0.5, img_width * 0.5 + 0.5
-        do_flip, angle, shift, scale = 0, 0, (0,0), 1        
+        do_flip, angle, shift, scale = 0, 0, (0,0), 1 #np.random.uniform(low=0.8, high=1.1)        
         affine_matrix = PairDataset.get_affine_matrix(center=center, fit=(fit_height, fit_width), angle=angle, translate=shift,
                 scale=scale, flip=do_flip)
         return affine_matrix
@@ -181,12 +189,13 @@ class PairDataset(data.Dataset):
         else:
             M_x_flip=np.float32([[1, 0, 0], [0, 1, 0]])
 
-        fit_scale = min(fit[0]/(2*center[0]), fit[1]/(2*center[1]))
+        fit_scale = max(fit[0]/(2*center[0]), fit[1]/(2*center[1]))
         FIT_scale = np.float32([[fit_scale, 0, 0], [0, fit_scale, 0]])
         
         M_scale = np.float32([[scale, 0, 0], [0, scale, 0]])
 
         M_translate = np.float32([[1, 0, translate[0]*fit[0]], [0, 1, translate[1]*fit[1]]])
+        # M_translate = np.float32([[1, 0, -(center[1]*2*fit_scale - fit[1])*scale], [0, 1, (1-scale) * fit[0]]])
 
         rads = math.radians(angle)
         cos, sin = math.cos(rads), math.sin(rads)
@@ -330,7 +339,7 @@ class VisualDataset(data.Dataset):
 
 
     def load_data(self, name):
-        seg = np.array(Image.open(name + ".seg3.render.png"))
+        seg = np.array(Image.open(name + ".seg_qanet.render.png"))
         img = cv2.imread(name)[:,:,[2,1,0]]
         with open(name + ".pose2.txt",'r') as f:
             line = f.read().split('\t')
@@ -341,9 +350,13 @@ class VisualDataset(data.Dataset):
         affine_transform = PairDataset._get_affine_stransform(self.crop_size, img.shape[0],img.shape[1])
 
         dstSize = (self.crop_size[1],self.crop_size[0])
-        resized_img = cv2.warpAffine(cv2.blur(img,(3,3)), affine_transform[:2],dstSize, 
-            flags=cv2.INTER_LINEAR,
-            borderMode=cv2.BORDER_CONSTANT, borderValue=(0,0,0))
+        resized_img = cv2.bilateralFilter(cv2.warpAffine(img, affine_transform[:2],dstSize, 
+            flags=cv2.INTER_AREA,
+            borderMode=cv2.BORDER_CONSTANT, borderValue=(0,0,0)),d=5,sigmaColor=15, sigmaSpace=15).astype(np.uint8)
+        
+        # resized_img = cv2.warpAffine(cv2.blur(img,(3,3)), affine_transform[:2],dstSize, 
+        #     flags=cv2.INTER_LINEAR,
+        #     borderMode=cv2.BORDER_CONSTANT, borderValue=(0,0,0))
         #Image.fromarray(img).transform((176,256), Image.AFFINE, affine_transform[:2].reshape(-1).tolist(),resample=Image.BILINEAR).save('img.png')
         # Image.fromarray(img).resize((176,256), Image.ANTIALIAS).save('img.png') 
         # Image.fromarray(cv2.warpAffine(cv2.blur(img,(2,3)), affine_transform[:2],dstSize, 

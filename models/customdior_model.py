@@ -12,7 +12,7 @@ GID = [2,5,1,3] # hair, top, bottom, jacket
 # bg, face, skin, arm, leg (the first has to be bg and the second has to be face.)
 PID  = [SEG.ID['background'], SEG.ID['face'], SEG.ID['skin'], SEG.ID['arm'], SEG.ID['leg']] 
 
-# hair, shoes, top, bottom, hat
+# hair, shoes,  bottom, top, hat
 GID = [SEG.ID['hair'], SEG.ID['shoes'], SEG.ID['pants'], SEG.ID['upper-clothes'], SEG.ID['hat']]
         
 class CustomDIORModel(DIORBaseModel):
@@ -51,6 +51,7 @@ class CustomDIORModel(DIORBaseModel):
         if self.isTrain:
             self.criterionVGG = external_functions.VGGLoss().to(self.device)
             self.contextSimlilarity =external_functions.ContextSimilarityLoss().to(self.device)
+            self.ganFeaturesLoss = external_functions.FeatureMappingsLoss().to(self.device)
             
             self.loss_coe['seg'] = opt.loss_coe_seg
             self.loss_coe['flow_reg'] = 0
@@ -64,6 +65,9 @@ class CustomDIORModel(DIORBaseModel):
                 self.visual_names += ['seg']
                 self.criterionCE = nn.BCELoss()
 
+            self.loss_names += ['dpose_features']
+            self.loss_names += ['dcontent_features']
+
             if not opt.frozen_flownet:
                 self.loss_coe['flow_reg'] = opt.loss_coe_flow_reg
                 self.loss_coe['flow_cor'] = opt.loss_coe_flow_cor
@@ -73,24 +77,34 @@ class CustomDIORModel(DIORBaseModel):
 
 
     def _init_models(self, opt):
-        super()._init_models(opt)
+        self.model_names = ["E_attr", "G", "VGG", "Flow"]
+        self.frozen_models = ["VGG"]
         self.visual_names = ['from_img', 'fake_B', 'to_img','from_pose_view','from_parse_view','to_pose_view','to_parse_view']
-        self.model_names += ["Flow"]
         if opt.frozen_flownet:
             self.frozen_models += ["Flow"]
         if opt.frozen_enc:
             self.frozen_models += ["E_attr"]
+        self.netVGG = networks.define_tool_networks(tool='vgg', load_ckpt_path="", gpu_ids=opt.gpu_ids)
+        # netG
+        self.netG = networks.define_G(input_nc=opt.n_kpts, output_nc=3, ngf=opt.ngf, latent_nc=opt.ngf * (2 ** 2), 
+                                      style_nc=opt.style_nc,
+                                      n_style_blocks=opt.n_style_blocks, n_human_parts=opt.n_human_parts, netG=opt.netG, 
+                                      norm=opt.norm_type, relu_type=opt.relu_type,
+                                      init_type=opt.init_type, init_gain=opt.init_gain, gpu_ids=self.gpu_ids)
         self.netFlow = networks.define_tool_networks(tool='flownet', load_ckpt_path=opt.flownet_path, gpu_ids=opt.gpu_ids)
         self.netE_attr = networks.define_E(input_nc=3, output_nc=opt.style_nc, netE=opt.netE, ngf=opt.ngf, n_downsample=2,
                                            norm_type=opt.norm_type, relu_type=opt.relu_type, frozen_flownet=opt.frozen_flownet,
                                            init_type=opt.init_type, init_gain=opt.init_gain, gpu_ids=self.gpu_ids)
      
-        
         if self.isTrain:
-            self.netD_content = networks.define_D(3+self.n_human_parts, 32, netD='gfla',
-                                            n_layers_D=3, norm=opt.norm_type, use_dropout=True, 
-                                            init_type=opt.init_type, init_gain=opt.init_gain, gpu_ids=self.gpu_ids
-                                               )
+            self.model_names += ["D_pose", "D_content"]
+            self.netD_pose = networks.define_D(opt.n_kpts+3, opt.ndf, opt.netD,
+                                          opt.n_layers_D, norm='none', use_dropout=not opt.no_dropout, 
+                                          init_type=opt.init_type, init_gain=opt.init_gain, gpu_ids=self.gpu_ids
+                                              )
+            self.netD_content = networks.define_D(3+self.n_human_parts, opt.ndf, opt.netD,
+                                          n_layers_D=opt.n_layers_D, norm='none', use_dropout=not opt.no_dropout, 
+                                          init_type=opt.init_type, init_gain=opt.init_gain, gpu_ids=self.gpu_ids)
 
   
 
@@ -117,7 +131,7 @@ class CustomDIORModel(DIORBaseModel):
         _,_,H,W = img.size()
         imgs = []
         for im in img:
-            mask = Masks.get_ff_mask(H,W)#from PIL import Image; Image.fromarray((255*mask).astype(np.uint8)).save('mask.png')
+            mask =  Masks.get_ff_mask(H,W,BRUSH_WIDTH=0.05, num_v=20, SEGMENT_LENGTH=0.3)#from PIL import Image; Image.fromarray((255*mask).astype(np.uint8)).save('mask.png')
             mask = torch.from_numpy(mask).unsqueeze(0).to(img.device).float()
             imgs += [(im * (1 - mask)).unsqueeze(0)]#from PIL import Image; Image.fromarray((127*np.transpose((im * (1 - mask)).cpu().numpy(),(1,2,0)) + 127 ).astype(np.uint8)).save('masked.png')
         img = torch.cat(imgs)
@@ -128,7 +142,7 @@ class CustomDIORModel(DIORBaseModel):
         if  not self.reduce:
             psegs = self.encode_attr(self.from_img, self.from_parse, self.from_kpt, self.to_kpt, PID)
             gsegs = self.encode_attr(self.from_img, self.from_parse, self.from_kpt, self.to_kpt, GID)
-            self.attn = [b for a,b in gsegs] + [b for a,b in psegs]
+            self.attn = [b for a,b in gsegs] + [b for a,b in psegs] #from PIL import Image; Image.fromarray((254*torch.cat(([a for a in self.attn]),-1)[0,0].detach().cpu().numpy() ).astype(np.uint8)).save('masked_shape.png')
             self.fake_B = self.netG(self.to_kpt, psegs, gsegs)
 
         else:
@@ -202,14 +216,25 @@ class CustomDIORModel(DIORBaseModel):
         """Calculate GAN and L1 loss for the generator"""
         # GAN loss 
         fake_AB = torch.cat((self.to_kpt, self.fake_B), 1) 
-        pred_fake = self.netD_pose(fake_AB)
+        pred_fake, d_layers_fake = self.netD_pose(fake_AB)
         self.loss_G_GAN_pose = self.criterionGAN(pred_fake, True) *  self.loss_coe['GAN']
         self.loss_G = self.loss_G_GAN_pose
 
         fake_AB = torch.cat((self.to_parse2, self.fake_B), 1)
-        pred_fake = self.netD_content(fake_AB)
+        pred_fake, d_layers = self.netD_content(fake_AB)
         self.loss_G_GAN_content = self.criterionGAN(pred_fake, True) * self.loss_coe['GAN']
         self.loss_G = self.loss_G + self.loss_G_GAN_content
+
+        with( torch.no_grad()):
+            _, d_layers_real = self.netD_content(torch.cat((self.to_parse2, self.to_img), 1))
+        features_loss = self.ganFeaturesLoss(d_layers_real, d_layers_fake)
+        self.loss_dcontent_features=features_loss * 0.1
+
+        with( torch.no_grad()):
+            _, d_layers_real = self.netD_pose(torch.cat((self.to_kpt, self.to_img), 1))
+        features_loss = self.ganFeaturesLoss(d_layers_real, d_layers_fake)
+        self.loss_dpose_features=features_loss * 0.1
+        self.loss_G = self.loss_G + self.loss_dpose_features + self.loss_dcontent_features
         
         fake_B = self.fake_B
         real_B = self.to_img
@@ -241,8 +266,8 @@ class CustomDIORModel(DIORBaseModel):
                 self.loss_seg = self.loss_seg + self.criterionCE(self.attn[i], target) * self.loss_coe['seg']
         else:
             mylist = GID + PID
-            for i in range(8):
-                target =  (self.to_parse == mylist[i]).unsqueeze(1).float()
+            for i in range(len(mylist)):
+                target =  (self.to_parse == mylist[i]).unsqueeze(1).float()#from PIL import Image; Image.fromarray((254*torch.cat((self.attn[i], target),-1)[0,0].detach().cpu().numpy() ).astype(np.uint8)).save('masked_shape.png')
                 self.loss_seg = self.loss_seg + self.criterionCE(self.attn[i], target) * self.loss_coe['seg']
         return self.loss_seg
     
@@ -251,6 +276,7 @@ class CustomDIORModel(DIORBaseModel):
         if not self.frozen_flownet:
             self.loss_flow_cor = 0.0
             if self.loss_coe['flow_cor'] > 0:
+                # self.loss_flow_cor = self.Correctness(self.to_img, self.from_img, self.flow_fields, [2,3])  * self.loss_coe['flow_cor']
                 self.loss_flow_cor = self.Correctness(self.to_img, self.from_img, self.flow_fields, [2,3])  * self.loss_coe['flow_cor']
                 loss = loss + self.loss_flow_cor
 
@@ -259,6 +285,32 @@ class CustomDIORModel(DIORBaseModel):
                 self.loss_flow_reg = self.Regularization(self.flow_fields) * self.loss_coe['flow_reg']
                 loss = loss + self.loss_flow_reg
         return loss
+
+    def backward_D(self):
+        """Calculate GAN loss for the discriminator"""
+        self.loss_D = self.compute_D_pose_loss() + self.compute_D_content_loss()
+        
+    def compute_D_pose_loss(self):
+         # pose 
+        fake_AB = torch.cat((self.to_kpt, self.fake_B), 1)  
+        pred_fake, _ = self.netD_pose(fake_AB.detach())
+        self.loss_D_fake_pose = self.criterionGAN(pred_fake, False) * self.loss_coe['GAN']
+        # Real
+        real_AB = torch.cat((self.to_kpt, self.to_img), 1)
+        pred_real, _ = self.netD_pose(real_AB)
+        self.loss_D_real_pose = self.criterionGAN(pred_real, True) * self.loss_coe['GAN']
+        return (self.loss_D_fake_pose + self.loss_D_real_pose) / 0.5
+
+    def compute_D_content_loss(self):
+        # content
+        fake_AB = torch.cat((self.to_parse2, self.fake_B), 1)  
+        pred_fake, _ = self.netD_content(fake_AB.detach())
+        self.loss_D_fake_content = self.criterionGAN(pred_fake, False) * self.loss_coe['GAN']
+        
+        real_AB = torch.cat((self.to_parse2, self.to_img), 1)
+        pred_real, _ = self.netD_content(real_AB)
+        self.loss_D_real_content = self.criterionGAN(pred_real, True)  * self.loss_coe['GAN']
+        return (self.loss_D_fake_content + self.loss_D_real_content) / 0.5
 
     
             

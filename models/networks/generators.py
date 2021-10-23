@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import random
 from models.networks.base_networks import *
 import os
-
+import numpy as np
 class BaseGenerator(nn.Module):
     def __init__(self, img_nc=3, kpt_nc=18, ngf=64, latent_nc=256, style_nc=64, n_human_parts=8, n_downsampling=2, n_style_blocks=4, norm_type='instance', relu_type='relu'):
         super(BaseGenerator, self).__init__()
@@ -140,14 +140,14 @@ class DIORGenerator(BaseGenerator):
         
         for s,attn in zip(styles, attns):
             mask = (attn > alpha).float().detach()
-            # import numpy as np;from PIL import Image; Image.fromarray((255*attn[0,0].cpu().numpy()).astype(np.uint8)).save('attn.png')
+            # from PIL import Image; Image.fromarray((254*torch.cat((mask,attn),-1)[0,0].detach().cpu().numpy() ).astype(np.uint8)).save('attn.png')
             # s = F.interpolate(s, (attn.size(2), attn.size(3)))
             N,C,H,W = s.size()
             # mean_s = s.view(N,C,-1).mean(-1).unsqueeze(-1).unsqueeze(-1)
             sum_mask = mask.view(N,1,-1).sum(-1).detach()
             mean_s = ((s*mask).view(N,C,-1).sum(-1)/(sum_mask + 1e-5)).unsqueeze(-1).unsqueeze(-1)
             s = s + mean_s
-            s = self.fusion(torch.cat([s, attn], 1))
+            s = self.fusion(torch.cat([s, mask], 1))
             s = s * mask
             ret.append(s)
             
@@ -165,11 +165,12 @@ class DIORGenerator(BaseGenerator):
 
         base = out
         self.base = base
-
+        # from PIL import Image; Image.fromarray((127*self.to_rgb(out)[0].permute(1,2,0).detach().cpu().numpy()+127).astype(np.uint8)).save('attn.png')
         for i in range(len(g_attns)):
             attn = g_attns[i]
             curr_mask = (attn > alpha).float().detach()
             # N = curr_mask.size(0)
+            # from PIL import Image; Image.fromarray((254*torch.cat((curr_mask,attn),-1)[0,0].detach().cpu().numpy() ).astype(np.uint8)).save('attn.png')
             N,C,H,W = curr_mask.size()
             exists = torch.sum(curr_mask.view(N,-1), 1)
             # exists_threshold = H*W *0.005

@@ -84,7 +84,7 @@ class DIORBaseModel(BaseModel):
                                           init_type=opt.init_type, init_gain=opt.init_gain, gpu_ids=self.gpu_ids
                                               )
             self.netD_content = networks.define_D(3+self.n_human_parts, opt.ndf, opt.netD,
-                                          n_layers_D=3, norm=opt.norm_type, use_dropout=not opt.no_dropout, 
+                                          n_layers_D=opt.n_layers_D, norm=opt.norm_type, use_dropout=not opt.no_dropout, 
                                           init_type=opt.init_type, init_gain=opt.init_gain, gpu_ids=self.gpu_ids)
         
     

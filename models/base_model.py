@@ -313,6 +313,8 @@ class BaseModel(ABC):
                 net = getattr(self, 'net' + name)
                 if isinstance(net, torch.nn.DataParallel):
                     net = net.module
+                elif hasattr(net,'module'):
+                    net = net.module
                 print('loading the model from %s' % load_path)
                 state_dict = torch.load(load_path, map_location=str(self.device))
                 if hasattr(state_dict, '_metadata'):

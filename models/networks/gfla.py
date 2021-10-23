@@ -103,6 +103,129 @@ class ResDiscriminator(BaseNetwork):
         out = self.conv(self.nonlinearity(out))
         return out
 
+
+class PatchResblockDiscriminatorWithLayers(nn.Module):
+    """
+    Patch Discriminator Network for Local 70*70 fake/real
+    :param input_nc: number of channels in input
+    :param ndf: base filter channel
+    :param img_f: the largest channel for the model
+    :param layers: down sample layers
+    :param norm: normalization function 'instance, batch, group'
+    :param activation: activation function 'ReLU, SELU, LeakyReLU, PReLU'
+    :param use_spect: use spectral normalization or not
+    :param use_coord: use CoordConv or nor
+    """
+    def __init__(self, input_nc=3, ndf=64, img_f=512, layers=3, multi_dim_out = False,
+                norm='batch', activation='LeakyReLU', use_spect=True,
+                use_coord=False):
+        super(PatchResblockDiscriminatorWithLayers, self).__init__()
+        self.layers = layers
+        self.multi_dim_out = multi_dim_out
+        norm_layer = get_norm_layer(norm_type=norm)
+        nonlinearity = get_nonlinearity_layer(activation_type=activation)
+
+        # encoder part
+        self.encoder0 = ResBlockEncoder(input_nc, ndf, ndf, norm_layer, nonlinearity, use_spect, use_coord)
+
+        mult = 1
+        for i in range(layers - 1):
+            mult_prev = mult
+            mult = min(2 ** (i + 1), img_f//ndf)
+            block = ResBlockEncoder(ndf*mult_prev, ndf*mult, ndf*mult_prev, norm_layer, nonlinearity, use_spect, use_coord)
+            setattr(self, 'encoder' + str(i+1), block)
+        
+        self.conv = SpectralNorm(nn.Conv2d(ndf*mult, 1, 1))
+
+    def forward(self, x):
+        layers = []
+        for i in range(self.layers):
+            x = getattr(self, 'encoder'+str(i))(x)
+            layers.append(x)
+        # if self.n_res > 0:
+        #     x = getattr(self, 'res')(x)
+        if not self.multi_dim_out:
+            x = self.conv(x)
+        return x, layers
+
+
+class PatchDiscriminatorWithLayers(nn.Module):
+    """
+    Patch Discriminator Network for Local 70*70 fake/real
+    :param input_nc: number of channels in input
+    :param ndf: base filter channel
+    :param img_f: the largest channel for the model
+    :param layers: down sample layers
+    :param norm: normalization function 'instance, batch, group'
+    :param activation: activation function 'ReLU, SELU, LeakyReLU, PReLU'
+    :param use_spect: use spectral normalization or not
+    :param use_coord: use CoordConv or nor
+    """
+    def __init__(self, input_nc=3, ndf=64, img_f=512, layers=3, n_res=1, multi_dim_out = False,
+                norm='batch', activation='LeakyReLU', use_spect=True,
+                use_coord=False):
+        super(PatchDiscriminatorWithLayers, self).__init__()
+        self.layers = layers
+        self.n_res =n_res
+        self.multi_dim_out = multi_dim_out
+        norm_layer = get_norm_layer(norm_type=norm)
+        nonlinearity = get_nonlinearity_layer(activation_type=activation)
+
+        kwargs = {'kernel_size': 3, 'stride': 2, 'padding': 1, 'bias': False}
+
+        sequence = []
+        if norm_layer is not None:
+            sequence +=[norm_layer(input_nc)]
+        sequence += [
+            coord_conv(input_nc, ndf, use_spect, use_coord, **kwargs),
+            nonlinearity,
+        ]
+        setattr(self,'enc0',nn.Sequential(*sequence))
+        mult = 1
+        for i in range(1, layers):
+            sequence = []
+            mult_prev = mult
+            mult = min(2 ** i, img_f // ndf)
+            if norm_layer is not None:
+                sequence +=[norm_layer(ndf * mult_prev)]
+            sequence +=[
+                coord_conv(ndf * mult_prev, ndf * mult, use_spect, use_coord, **kwargs),
+                nonlinearity,
+            ]
+            setattr(self, 'enc'+str(i),nn.Sequential(*sequence))
+        
+        if self.n_res>0:
+            setattr(self, 'res',ResBlocks(self.n_res,ndf * mult,norm_layer=norm_layer,
+                nonlinearity=nonlinearity,use_spect=use_spect,use_coord=use_coord))
+
+        sequence=[]
+        mult_prev = mult
+        mult = min(2 ** i, img_f // ndf)
+        kwargs = {'kernel_size': 3, 'stride': 1, 'padding': 1, 'bias': False}
+        if norm_layer is not None:
+            sequence +=[norm_layer(ndf * mult_prev)]
+        sequence += [
+            coord_conv(ndf * mult_prev, ndf * mult, use_spect, use_coord, **kwargs),
+            nonlinearity,
+            coord_conv(ndf * mult, 1, use_spect, use_coord, **kwargs),
+        ]
+        self.final_model = nn.Sequential(*sequence)
+
+    def forward(self, x):
+        layers = []
+        for i in range(self.layers):
+            x = getattr(self, 'enc'+str(i))(x)
+            layers.append(x)
+        if self.n_res > 0:
+            x = getattr(self, 'res')(x)
+        if not self.multi_dim_out:
+            x = self.final_model(x)
+        return x, layers
+
+
+
+
+
 class PoseFlowNet(nn.Module):
     """docstring for FlowNet"""
     def __init__(self, image_nc, structure_nc, ngf=64, img_f=1024, encoder_layer=5, attn_layer=[1], norm='batch',

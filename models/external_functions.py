@@ -188,7 +188,7 @@ class VGGLoss(nn.Module):
     https://github.com/dxyang/StyleTransfer/blob/master/utils.py
     """
 
-    def __init__(self, weights=[1.0, 1.0, 1.0, 1.0, 1.0]):
+    def __init__(self, weights=[1.0/32, 1.0/16, 1.0/8, 1.0/4, 1.0]):
         super(VGGLoss, self).__init__()
         self.add_module('vgg', VGG19())
         self.criterion = torch.nn.L1Loss()
@@ -211,6 +211,12 @@ class VGGLoss(nn.Module):
             content_loss += self.weights[2] * self.criterion(x_vgg['relu3_1'], y_vgg['relu3_1'])
             content_loss += self.weights[3] * self.criterion(x_vgg['relu4_1'], y_vgg['relu4_1'])
             content_loss += self.weights[4] * self.criterion(x_vgg['relu5_1'], y_vgg['relu5_1'])
+
+            # content_loss += self.weights[0] * self.criterion(x_vgg['relu1_1'], y_vgg['relu1_1']) / x_vgg['relu1_1'][0].numel()
+            # content_loss += self.weights[1] * self.criterion(x_vgg['relu2_1'], y_vgg['relu2_1']) / x_vgg['relu2_1'][0].numel()
+            # content_loss += self.weights[2] * self.criterion(x_vgg['relu3_1'], y_vgg['relu3_1']) / x_vgg['relu3_1'][0].numel()
+            # content_loss += self.weights[3] * self.criterion(x_vgg['relu4_1'], y_vgg['relu4_1']) / x_vgg['relu4_1'][0].numel()
+            # content_loss += self.weights[4] * self.criterion(x_vgg['relu5_1'], y_vgg['relu5_1']) / x_vgg['relu5_1'][0].numel()
             if content_only:
                 return content_loss
 
@@ -221,7 +227,7 @@ class VGGLoss(nn.Module):
             style_loss += self.criterion(self.compute_gram(x_vgg['relu4_4']), self.compute_gram(y_vgg['relu4_4']))
             style_loss += self.criterion(self.compute_gram(x_vgg['relu5_2']), self.compute_gram(y_vgg['relu5_2']))
         else:
-            content_loss = self.criterion(x_vgg['relu5_1'], y_vgg['relu5_1'])
+            content_loss = self.criterion(x_vgg['relu5_1'], y_vgg['relu5_1']) / x_vgg['relu5_1'][0].numel()
             if content_only:
                 return content_loss
             style_loss = self.criterion(self.compute_gram(x_vgg['relu5_2']), self.compute_gram(y_vgg['relu5_2']))
@@ -245,6 +251,10 @@ class PerceptualCorrectness(nn.Module):
         used_layers=sorted(used_layers, reverse=True)
         # self.target=target
         # self.source=source
+        # resize to small size for gpu memory
+        target = nn.AvgPool2d(2)(target)
+        source = nn.AvgPool2d(2)(source)
+
         self.target_vgg, self.source_vgg = self.vgg(target), self.vgg(source)
         loss = 0
         for i in range(len(flow_list)):
@@ -257,8 +267,10 @@ class PerceptualCorrectness(nn.Module):
     def calculate_loss(self, flow, layer, mask=None, use_bilinear_sampling=False):
         target_vgg = self.target_vgg[layer]
         source_vgg = self.source_vgg[layer]
+
         [b, c, h, w] = target_vgg.shape
         # maps = F.interpolate(maps, [h,w]).view(b,-1)
+        
         flow = F.interpolate(flow, [h,w])
 
         target_all = target_vgg.view(b, c, -1)                      #[b C N2]
@@ -425,6 +437,23 @@ class ContextSimilarityLoss(nn.Module):
                 featureT = nn.AvgPool2d(2)(featureT)
             cx_style_loss += self.feature_loss(featureT, featureI)
         return cx_style_loss
+
+
+class FeatureMappingsLoss(nn.Module):
+    def __init__(self, weights=[1.0 / 32, 1.0 / 16, 1.0 / 8, 1.0 / 4, 1.0]):
+        r"""
+        type = nsgan | lsgan | hinge
+        """
+        super(FeatureMappingsLoss, self).__init__()
+        self.criterion = torch.nn.L1Loss()
+        self.weights = weights
+    
+    def forward(self, layers1, layers2):
+        loss = 0
+        for i in range(len(layers1)):
+            # loss +=  self.weights[i] * self.criterion(layers1[i], layers2[i]) / layers1[i][0].numel()
+            loss +=  self.weights[i] * self.criterion(layers1[i], layers2[i])
+        return loss
 
 
 class VGG19(torch.nn.Module):

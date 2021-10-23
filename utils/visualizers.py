@@ -21,7 +21,7 @@ def define_visualizer(model_name):
 class FlowVisualizer:
         
     @staticmethod
-    def swap_garment(data, model, gid=5, display_mask=False, step=-1, prefix=""):
+    def swap_garment(data, model, gid=5, display_mask=False, display_body = False, step=-1, prefix=""):
         model.eval()
         #display_mask = True # display_mask and 'seg' in model.visual_names
         imgs, parses, poses = data
@@ -32,6 +32,7 @@ class FlowVisualizer:
         # all_mask = [torch.zeros(imgs.size())[None].to(model.device)]
         all_mask = [(parses.unsqueeze(1) == gid).float().expand_as(imgs).to(model.device).unsqueeze(0)]
         all_fake = [imgs[None]]
+        all_body = [torch.zeros_like(imgs[None])]
         # import pdb; pdb.set_trace()
         for img, parse, pose in zip(imgs, parses, poses):
             curr_to_pose = pose[None].expand_as(poses)
@@ -59,6 +60,11 @@ class FlowVisualizer:
                 segm_color =functions.assign_color(segm_max, model.n_human_parts)
                 all_mask += [segm_color[None]]
                 # all_mask += [model.get_seg_visual(gid).expand(N,3,H,W)[None]]
+            
+            if display_body:
+                body_img = model.netG.module.to_rgb(model.netG.module.base.detach()).detach()
+                all_body += [body_img[None]]
+
 
         # display
         all_fake = torch.cat(all_fake)
@@ -67,10 +73,16 @@ class FlowVisualizer:
         #all_mask[0] = F.interpolate(all_mask[0], (H,W))
         if display_mask:
             all_mask = torch.cat(all_mask)
+        if display_body:
+            all_body = torch.cat(all_body)
         ret = []
         for i in range(all_fake.size(1)):
-            if display_mask:
+            if display_mask and display_body:
+                print_img = torch.cat([all_fake[:,i], all_body[:,i], all_mask[:,i]],2)
+            elif display_mask:
                 print_img = torch.cat([all_fake[:,i], all_mask[:,i]],2)
+            elif display_body:
+                print_img = torch.cat([all_fake[:,i], all_body[:,i]],2)
             else:
                 print_img = all_fake[:, i]
             ret.append(print_img)

@@ -15,7 +15,8 @@ def torch_transform(img, flow_field):
         y = torch.arange(h).view(-1, 1).expand(-1, w).float()
         x = 2*x/(w-1)-1
         y = 2*y/(h-1)-1
-        grid = torch.stack([x,y], dim=0).float().cuda()
+        # grid = torch.stack([x,y], dim=0).float().cuda()
+        grid = torch.stack([x,y], dim=0).float().to(img.device)
         grid = grid.unsqueeze(0).expand(b, -1, -1, -1)
         flow_x = (2*flow_field[:,0,:,:]/(w-1)).view(b,1,h,w)
         flow_y = (2*flow_field[:,1,:,:]/(h-1)).view(b,1,h,w)

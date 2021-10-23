@@ -22,7 +22,8 @@ def generate_val_img(visual_ds, model, opt, step=0,garment_id=SEG.ID['upper-clot
         for cata in visual_ds.selected_keys:
             data = visual_ds.get_attr_visual_input(cata)
             # Visualizer.swap_garment(data, model,  prefix=cata, step=step, gid=5)
-            Visualizer.swap_garment(data, model,  prefix=cata, step=step, gid=garment_id,display_mask=display_mask)
+            Visualizer.swap_garment(data, model,  prefix=cata, step=step, gid=garment_id,display_mask=display_mask,
+                display_body=True)
             print("[visualize] swap garments - %s" % cata)
             #Visualizer.swap_texture(data, patches, model,  prefix=cata, step=step)
             #print("[visualize] swap textures - %s" % cata)
@@ -46,6 +47,8 @@ def main():
         num_workers=opt.n_cpus, pin_memory=True, prefetch_factor=10)
     dataset_size = len(dataset)    # get the number of images in the dataset.
     print('The number of training images = %d' % dataset_size)
+    # dataset = torch.utils.data.DataLoader(PairDataset(opt), batch_size=opt.batch_size, shuffle=False,
+    #     num_workers=opt.n_cpus, pin_memory=True, prefetch_factor=10)
     # for i,data in enumerate(dataset):
     #     # data = next(dataset_iter)
     #     print(i)
@@ -71,6 +74,7 @@ def main():
             bs, cs, coe = progressive_steps[keys[curr_step]]
             print("[progressive] init - iter %d, bs: %d, crop: %d" % (total_iters, bs, cs))
             model, dataset, visual_ds = progressive_adjust(model, opt, bs, cs, coe, square=opt.square) 
+    
     # generate_val_img(visual_ds, model, opt, step=total_iters,garment_id=SEG.ID['upper-clothes'], display_mask=True)    
                 
     # total_iters =-1
@@ -103,14 +107,8 @@ def main():
                     out_string += "%s: %.4f, " % (loss_name, losses[loss_name])
                 print(out_string)
 
-            # tensorboard
-            if total_iters % opt.display_freq == 0:   #
-                model.compute_visuals(total_iters, loss_only=False)
-                if opt.run_test:
-                    generate_val_img(visual_ds, model, opt, step=total_iters)
-                print("at %d, compute visuals" % total_iters)                
-           
-            # save latest ckpt  
+            
+                        # save latest ckpt  
             if total_iters % opt.save_latest_freq == 0:   # cache our latest model every <save_latest_freq> iterations
                 print('saving the latest model (total_iters %d)' % (total_iters))
                 model.save_networks('latest', total_iters)
@@ -121,6 +119,16 @@ def main():
                 print('saving the model at the end of iters %d' % (total_iters))
                 save_suffix = 'iter_%d' % total_iters 
                 model.save_networks(save_suffix)
+
+            
+            # tensorboard
+            if total_iters % opt.display_freq == 0:   #
+                model.compute_visuals(total_iters, loss_only=False)
+                if opt.run_test:
+                    generate_val_img(visual_ds, model, opt, step=total_iters, display_mask =True)
+                print("at %d, compute visuals" % total_iters)                
+           
+
             
             
                 

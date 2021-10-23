@@ -6,14 +6,13 @@ from scipy import ndimage, misc
 class Masks:
 
     @staticmethod
-    def get_ff_mask(h, w, num_v = None):
+    def get_ff_mask(h, w, num_v = 10, BRUSH_WIDTH = 0.05, SEGMENT_LENGTH = 0.3):
         #Source: Generative Inpainting https://github.com/JiahuiYu/generative_inpainting
 
         mask = np.zeros((h,w))
-        if num_v is None:
-            num_v = 15+np.random.randint(9) #5
-        SEGMENT_LENGTH = int(min(h,w)*0.3)
-        BRUSH_WIDTH = int(min(h,w)*0.05)
+        num_v = num_v + np.random.randint(9) #5
+        SEGMENT_LENGTH = int(min(h,w)*SEGMENT_LENGTH)
+        BRUSH_WIDTH = int(min(h,w)*BRUSH_WIDTH)
         for i in range(num_v):
             start_x = np.random.randint(w)
             start_y = np.random.randint(h)

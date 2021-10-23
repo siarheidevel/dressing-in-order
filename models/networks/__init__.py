@@ -1,7 +1,7 @@
 from .base_networks import *
 from .generators import *
 from .vgg import *
-from .gfla import PoseFlowNet, ResDiscriminator
+from .gfla import PoseFlowNet, ResDiscriminator, PatchDiscriminatorWithLayers, PatchResblockDiscriminatorWithLayers
 import importlib
 
 def find_generator_using_name(model_name):
@@ -99,6 +99,11 @@ def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', use_dropout=True, 
                                 padding_type='reflect', use_sigmoid=use_sigmoid, n_downsampling=2)
     elif netD == 'gfla':
         net = ResDiscriminator(input_nc=input_nc, ndf=ndf, img_f=256, layers=n_layers_D, activation='LeakyReLU')
+        # net = ResDiscriminator(input_nc=input_nc, ndf=ndf, img_f=512, layers=n_layers_D,norm=norm, activation='LeakyReLU')
+        return init_net(net, gpu_ids=gpu_ids, do_init_weight=False)
+    elif netD == 'resnet_patch_layers':
+        net = PatchResblockDiscriminatorWithLayers(input_nc=input_nc, ndf=ndf, img_f=512, layers=n_layers_D,norm=norm, activation='LeakyReLU')
+        # PatchResblockDiscriminatorWithLayers(input_nc=input_nc, ndf=ndf, img_f=512, layers=4,norm=norm, activation='LeakyReLU')(torch.randn(1,21,512,324))[0]
         return init_net(net, gpu_ids=gpu_ids, do_init_weight=False)
     else:
         raise NotImplementedError('Discriminator model name [%s] is not recognized' % netD)
