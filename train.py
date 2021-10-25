@@ -43,10 +43,15 @@ def main():
     opt.square = False
     # dataset = create_dataset(opt)  # create a dataset given opt.dataset_mode and other options
     dataset = PairDataset(opt)
+
+    # dataset.load_data('/home/deeplab/datasets/deepfashion/diordataset_custom/img_highres/WOMEN/Tees_Tanks/id_00003241/02_2_side.jpg', do_augm=True)
+    # '/home/deeplab/datasets/custom_fashion/data/wildberries_ru_/1743/17430312/17430312-2.jpg'
+
     dataset = torch.utils.data.DataLoader(dataset, batch_size=opt.batch_size, shuffle=(opt.phase == 'train'),
         num_workers=opt.n_cpus, pin_memory=True, prefetch_factor=10)
     dataset_size = len(dataset)    # get the number of images in the dataset.
     print('The number of training images = %d' % dataset_size)
+
     # dataset = torch.utils.data.DataLoader(PairDataset(opt), batch_size=opt.batch_size, shuffle=False,
     #     num_workers=opt.n_cpus, pin_memory=True, prefetch_factor=10)
     # for i,data in enumerate(dataset):
@@ -54,6 +59,7 @@ def main():
     #     print(i)
     #     if i>10:break
     # visual_ds = create_visual_ds('PairDataset')
+
     visual_ds = VisualDataset(Path('/home/deeplab/datasets/deepfashion/diordataset_custom/standard_test_anns.txt'), dim = opt.crop_size)
     
     # set up model

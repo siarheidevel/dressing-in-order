@@ -56,7 +56,8 @@ class PairDataset(data.Dataset):
         self.crop_size = opt.crop_size
         annotation_index_csv = os.path.join(self.dataroot, 'annotation_index_qanet.csv')
         annotation_pairs_csv = os.path.join(self.dataroot, 'annotation_pairs_qanet.csv')
-
+        # annotation_index_csv = os.path.join(self.dataroot, 'annotation_index.csv')
+        # annotation_pairs_csv = os.path.join(self.dataroot, 'annotation_pairs.csv')
         self.do_flip=True
 
         # group;pair1;pair2
@@ -77,8 +78,8 @@ class PairDataset(data.Dataset):
     
     def __getitem__(self, index):
         from_name, to_name = self.pairs_df.iloc[index][['from','to']].to_list()
-        from_img, from_kpt, from_parse = self.load_data(from_name)
-        to_img, to_kpt, to_parse = self.load_data(to_name)
+        from_img, from_kpt, from_parse = self.load_data(from_name, do_augm=True)
+        to_img, to_kpt, to_parse = self.load_data(to_name, do_augm=True)
         if self.do_flip:
             make_flip = random.random() > 0.5
             if make_flip:
@@ -90,20 +91,26 @@ class PairDataset(data.Dataset):
                 to_parse = torch.flip(to_parse, [1])
                 to_kpt = torch.flip(to_kpt, [2])[[0,1,5,6,7,2,3,4,11,12,13,8,9,10,15,14,17,16],...]
         # Image.fromarray((np.transpose(from_img,(1,2,0)).numpy()*127+127).astype(np.uint8),'RGB').save('image.jpg');Image.fromarray(from_parse.numpy()*20).save('maskk.png')
+        # Image.fromarray((from_parse.numpy()*20).astype(np.uint8)).save('seg.png')
+        # Image.fromarray(_view_pose(from_kpt)).save('pose.png')
+        # Image.fromarray((from_img.permute([1,2,0]).numpy()*127 + 127).astype(np.uint8)).save('img.png')
+
         return from_img, from_kpt, from_parse, to_img, to_kpt, to_parse, index #torch.Tensor([0])
 
 
-    def load_data(self, name):
+    def load_data(self, name, do_augm=False):
         seg = np.array(Image.open(name + ".seg_qanet.render.png"))
         img = cv2.imread(name)[:,:,[2,1,0]]
         pose_y_str,pose_x_str = self.index_df.loc[name][['keypoints_y', 'keypoints_x']].to_list()
         pose_array = pose_utils.load_pose_cords_from_strings(pose_y_str, pose_x_str)
-        affine_transform = PairDataset._get_affine_stransform(self.crop_size, img.shape[0],img.shape[1])
+        affine_transform = PairDataset._get_affine_stransform(self.crop_size, img.shape[0],img.shape[1], do_augm)
 
         dstSize = (self.crop_size[1],self.crop_size[0])
         resized_img = cv2.bilateralFilter(cv2.warpAffine(img, affine_transform[:2],dstSize, 
             flags=cv2.INTER_AREA,
             borderMode=cv2.BORDER_CONSTANT, borderValue=(0,0,0)),d=5,sigmaColor=15, sigmaSpace=15).astype(np.uint8)
+        Image.fromarray(resized_img).save('img.png')
+
         # Image.fromarray(cv2.bilateralFilter(cv2.warpAffine(img, affine_transform[:2],dstSize, 
         #     flags=cv2.INTER_AREA,
         #     borderMode=cv2.BORDER_CONSTANT, borderValue=(0,0,0)),d=5,sigmaColor=11, sigmaSpace=24).astype(np.uint8),'RGB').save('image3.jpg')
@@ -132,13 +139,19 @@ class PairDataset(data.Dataset):
         # cv2.imwrite('pose.jpg',np.sum(pose, axis=-1)*127)
         pose = np.transpose(pose,(2, 0, 1))
         # resized_img = np.transpose(resized_img,(2, 0, 1))
+
+
+        # augmenation remove bg 
+        resized_img =_remove_bg(resized_img, (redused_seg==SEG.ID['background']).astype(np.uint8))
+
         img_tensor, pose_tensor, seg_tensor = self.transforms(resized_img), torch.Tensor(pose), torch.Tensor(redused_seg)
         # Image.fromarray((img_tensor.permute([1,2,0]).numpy()*127 + 127).astype(np.uint8)).save('img.png')
-        # Image.fromarray((torch.flip(img_tensor, [2]).permute([1,2,0]).numpy()*127 + 127).astype(np.uint8)).save('img_flip.png')
+        # # Image.fromarray((torch.flip(img_tensor, [2]).permute([1,2,0]).numpy()*127 + 127).astype(np.uint8)).save('img_flip.png')
         # Image.fromarray((seg_tensor.numpy()*20).astype(np.uint8)).save('seg.png')
-        # Image.fromarray(( torch.flip(seg_tensor, [1]).numpy()*20).astype(np.uint8)).save('seg_flip.png')
+        # # Image.fromarray(( torch.flip(seg_tensor, [1]).numpy()*20).astype(np.uint8)).save('seg_flip.png')
         # Image.fromarray(_view_pose(pose_tensor)).save('pose.png')
-        # Image.fromarray(_view_pose(torch.flip(pose_tensor, [2])[[0,1,5,6,7,2,3,4,11,12,13,8,9,10,15,14,17,16],...])).save('pose_flip.png')
+        # # Image.fromarray(_view_pose(torch.flip(pose_tensor, [2])[[0,1,5,6,7,2,3,4,11,12,13,8,9,10,15,14,17,16],...])).save('pose_flip.png')
+
         return img_tensor, pose_tensor, seg_tensor
 
     @staticmethod
@@ -150,35 +163,17 @@ class PairDataset(data.Dataset):
         return texture_mask
         
     @staticmethod
-    def _get_affine_stransform(crop_size, img_height, img_width):
+    def _get_affine_stransform(crop_size, img_height, img_width, do_augm = False):
         fit_height, fit_width = crop_size[0], crop_size[1]
         center = img_height * 0.5 + 0.5, img_width * 0.5 + 0.5
-        do_flip, angle, shift, scale = 0, 0, (0,0), 1 #np.random.uniform(low=0.8, high=1.1)        
+        do_flip, angle, shift, scale = 0, 0, [0,0], 1
+        # heavy augmentation
+        if do_augm:
+            do_flip, angle, shift, scale = 0, 0, [np.random.uniform(low=-0.05, high=0.05),0], np.random.uniform(low=0.8, high=1.2) 
+            # do_flip, angle, shift, scale = 0, 0, [0.1,0], 1.2       
         affine_matrix = PairDataset.get_affine_matrix(center=center, fit=(fit_height, fit_width), angle=angle, translate=shift,
                 scale=scale, flip=do_flip)
         return affine_matrix
-
-
-    # def getRandomAffineParam(self):
-    #     if self.opt.angle is not None:
-    #         angle = np.random.uniform(low=self.opt.angle[0], high=self.opt.angle[1])
-    #     else:
-    #         angle = 0
-    #     if self.opt.scale is not None:
-    #         scale   = np.random.uniform(low=self.opt.scale[0], high=self.opt.scale[1])
-    #     else:
-    #         scale=1
-    #     if self.opt.shift is not None:
-    #         shift_x = np.random.uniform(low=self.opt.shift[0], high=self.opt.shift[1])
-    #         shift_y = np.random.uniform(low=self.opt.shift[0], high=self.opt.shift[1])
-    #     else:
-    #         shift_x=0
-    #         shift_y=0
-    #     if self.opt.flip:
-    #         do_flip = np.random.choice([False, True])
-    #     else:
-    #         do_flip = False
-    #     return do_flip, angle, (shift_x,shift_y), scale
 
 
     @staticmethod
@@ -193,8 +188,9 @@ class PairDataset(data.Dataset):
         FIT_scale = np.float32([[fit_scale, 0, 0], [0, fit_scale, 0]])
         
         M_scale = np.float32([[scale, 0, 0], [0, scale, 0]])
-
-        M_translate = np.float32([[1, 0, translate[0]*fit[0]], [0, 1, translate[1]*fit[1]]])
+        # 0.02 fix coef for bad segmentation
+        translate[1] = (1-2* fit_scale* center[0]*scale / fit[0])+0.02
+        M_translate = np.float32([[1, 0, translate[0]*fit[1]], [0, 1, translate[1]*fit[0]]])
         # M_translate = np.float32([[1, 0, -(center[1]*2*fit_scale - fit[1])*scale], [0, 1, (1-scale) * fit[0]]])
 
         rads = math.radians(angle)
@@ -377,6 +373,10 @@ class VisualDataset(data.Dataset):
         # cv2.imwrite('pose.jpg',np.sum(pose, axis=-1)*127)
         pose = np.transpose(pose,(2, 0, 1))
         # resized_img = np.transpose(resized_img,(2, 0, 1))
+
+        # augmenation remove bg 
+        resized_img =_remove_bg(resized_img, (redused_seg==SEG.ID['background']).astype(np.uint8))
+
         img_tensor, pose_tensor, seg_tensor = self.transforms(resized_img), torch.Tensor(pose), torch.Tensor(redused_seg)
         # Image.fromarray((img_tensor.permute([1,2,0]).numpy()*127 + 127).astype(np.uint8)).save('img.png')
         # Image.fromarray((torch.flip(img_tensor, [2]).permute([1,2,0]).numpy()*127 + 127).astype(np.uint8)).save('img_flip.png')
@@ -417,3 +417,16 @@ def _view_pose(pose):
     coords = map_to_cord(pose.cpu().permute(1,2,0).numpy())
     pose_img = draw_pose_from_cords(coords,(H,W))[0]
     return pose_img
+
+
+def _remove_bg(img, bg_mask, bg_color = [255,249,249]):
+    bg_kernel = (3, 3)
+    # bg_color = [234,230,224]    
+    eroded_mask = cv2.dilate(bg_mask,np.ones(bg_kernel),iterations=1) #Image.fromarray((eroded_mask*255).astype(np.uint8)).save('mask.png')
+    eroded_mask = cv2.morphologyEx(eroded_mask, cv2.MORPH_OPEN, np.ones(bg_kernel, np.uint8))
+    blurred_mask = cv2.GaussianBlur(eroded_mask.astype(np.float),bg_kernel,0) #Image.fromarray((blurred_mask*255).astype(np.uint8)).save('mask.png')
+    # blurred_img = cv2.blur(img.astype(np.float),(5,5),0)  #Image.fromarray((blurred_img).astype(np.uint8)).save('mask.png')
+    bg_img = np.ones_like(img)*bg_color
+    final_img = img * (1-blurred_mask[...,None]) + blurred_mask[...,None] * bg_img
+    # Image.fromarray((final_img ).astype(np.uint8)).save('mask.png')
+    return final_img.astype(np.uint8)

@@ -150,7 +150,7 @@ class CustomDIORModel(DIORBaseModel):
             if self.perturb:
                 img = self.perturb_images(img)
             self.from_img = img
-            self.from_pase = self.to_parse
+            self.from_parse = self.to_parse
             self.from_kpt = self.to_kpt
             if self.warmup:
                 z = self.netE_attr(img, self.netVGG)

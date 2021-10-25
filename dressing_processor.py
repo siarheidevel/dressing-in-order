@@ -15,10 +15,10 @@ import os
 import sys
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 os.chdir(os.path.abspath(os.path.dirname(__file__)))
-CUDA_DEVICE= 'cuda:0'
+CUDA_DEVICE= 'cuda:1'
 torch.cuda.set_device(CUDA_DEVICE)
 logging.basicConfig(level = logging.INFO)
-from datasets.custom_dataset import SEG, PairDataset, get_palette
+from datasets.custom_dataset import SEG, PairDataset, get_palette, _view_pose
 from models.customdior_model import CustomDIORModel
 from utils import pose_utils
 
@@ -76,11 +76,12 @@ def get_model_params():
     opt.norm_type = 'instance'; opt.relu_type = 'leakyrelu'
     opt.init_type = 'orthogonal'; opt.init_gain = 0.02; 
     opt.random_rate = 1; opt.perturb = False; opt.warmup=False; opt.verbose = False
-    opt.name = "dior_custom_512_deepfashion"
+    # opt.name = "dior_custom_512_deepfashion_1"
+    opt.name = "dior_custom_512_deepfashion_2_aug_nobg"
     opt.checkpoints_dir = 'checkpoints'; opt.vgg_path = ''; opt.flownet_path = ''; 
     opt.frozen_enc = True; opt.frozen_flownet = True;
     opt.load_iter = 0; opt.epoch = 'latest'
-    opt.gpu_ids = []
+    opt.gpu_ids = [1]
     return opt
 
 # # 256x176 res
@@ -191,29 +192,33 @@ def crop2box(im, box=(256,176)):
 
 def preprocess_image(image_file):
     image_array = np.zeros((*IMG_DEFAULT_SIZE,3),dtype=np.uint8)
-    im = cv2.imread(image_file)[:,:,[2,1,0]]
+    image_rgb = cv2.imread(image_file)[:,:,[2,1,0]]
 
-    im = resize2box(im, IMG_DEFAULT_SIZE, [0,0,0])
-    # im = crop2box(im, (200,100))
+    # get person bbox
+    #     curl -X 'POST' \
+    #   'http://localhost:8010/boxes' \
+    #   -H 'accept: application/json' \
+    #   -H 'Content-Type: multipart/form-data' \
+    #   -F 'upload_file=@000057_0.jpg;type=image/jpeg'
+    with open(image_file, 'rb') as f:
+        files = {'upload_file': f}
+        response = requests.post('http://localhost:8010/boxes', files=files)
+        if response.status_code == 200:
+            json = response.json()
+            bboxes = json['bboxes']
+    
+    assert len(bboxes)>0
+    box=bboxes[0]
+    width, height = image_rgb.shape[1], image_rgb.shape[0]
+    # Image.fromarray(image_rgb[int(pred_boxes[0][0][1]):int(pred_boxes[0][1][1]),int(pred_boxes[0][0][0]):int(pred_boxes[0][1][0]),...]).save("box_img.png")
+    # 384, 512
+    margin_y, margin_x = (box[2] - box[0])*0.05, (box[3] - box[1])*0.05
+    box_img_array = image_rgb[int(max(box[1]-margin_y, 0)):int(min(box[3]+margin_y,height)),
+        int(max(box[0]-margin_x, 0)):int(max(box[2]+margin_x,width)),...]
 
-    # # Image.fromarray(cv2.imread(image_file)[:,:,[2,1,0]]).resize((192,256),Image.LANCZOS).save('img.jpg')
-    # if im.shape[0]>IMG_DEFAULT_SIZE[0] or im.shape[1]>IMG_DEFAULT_SIZE[1]:
-    #     ratio = min(IMG_DEFAULT_SIZE[0]/im.shape[0], IMG_DEFAULT_SIZE[1]/im.shape[1])
-    #     im =np.array(Image.fromarray(im).resize((int(ratio*im.shape[1]),int(ratio*im.shape[0])),Image.LANCZOS))
-    #     # .save('img.jpg')
-    #     # im = cv2.resize(cv2.blur(im,(3,3)),(int(ratio*im.shape[1]),int(ratio*im.shape[0])),cv2.INTER_LANCZOS4)
 
-    # h_start = (IMG_DEFAULT_SIZE[0]-im.shape[0])//2 
-    # w_start = (IMG_DEFAULT_SIZE[1]-im.shape[1])//2
-    # image_array[h_start:h_start+im.shape[0],
-    #         w_start:w_start+im.shape[1],...] = im 
-    # with Image.open(image_file) as im:
-    #     if im.size[1]>IMG_DEFAULT_SIZE[0] or im.size[0]>IMG_DEFAULT_SIZE[1]:
-    #         im.thumbnail(list(reversed(IMG_DEFAULT_SIZE)))
-    #     h_start = (IMG_DEFAULT_SIZE[0]-im.size[1])//2 
-    #     w_start = (IMG_DEFAULT_SIZE[1]-im.size[0])//2
-    #     image_array[h_start:h_start+im.size[1],
-    #         w_start:w_start+im.size[0],...] = np.array(im)
+    im = resize2box(box_img_array, IMG_DEFAULT_SIZE, [0,0,0])
+    
     Path(TEMP_DIR).mkdir(parents=True, exist_ok=True)
     new_image_file = os.path.join(TEMP_DIR, 
         ''.join(random.choice('abcdefgh') for i in range(4))+'_'+ Path(image_file).name)
@@ -285,12 +290,30 @@ def get_data_from_image(image_file):
     pose = np.transpose(pose,(2, 0, 1))
 
     img = np.array(im)
-    #remove bg
-    img[redused_seg==SEG.ID['background'],:] = [234,230,224]
-    img_tensor = img_transforms(img)
-
+    #remove bg ####################################################################
+    # img[redused_seg==SEG.ID['background'],:] = [234,230,224]
+    # Image.fromarray((cv2.blur((redused_seg==SEG.ID['background']).astype(np.float),(5,5),0)*254).astype(np.uint8)).save('mask.png')
+    bg_kernel = (3, 3)
+    # bg_color = [234,230,224]
+    bg_color = [255,249,249]
+    bg_mask = (redused_seg==SEG.ID['background']).astype(np.uint8) #Image.fromarray((bg_mask*255).astype(np.uint8)).save('mask.png')
+    eroded_mask = cv2.dilate(bg_mask,np.ones(bg_kernel),iterations=1) #Image.fromarray((eroded_mask*255).astype(np.uint8)).save('mask.png')
+    eroded_mask = cv2.morphologyEx(eroded_mask, cv2.MORPH_OPEN, np.ones(bg_kernel, np.uint8))
+    blurred_mask = cv2.GaussianBlur(eroded_mask.astype(np.float),bg_kernel,0) #Image.fromarray((blurred_mask*255).astype(np.uint8)).save('mask.png')
+    # blurred_img = cv2.blur(img.astype(np.float),(5,5),0)  #Image.fromarray((blurred_img).astype(np.uint8)).save('mask.png')
+    bg_img = np.ones_like(img)*bg_color
+    final_img = img * (1-blurred_mask[...,None]) + blurred_mask[...,None] * bg_img
+    Image.fromarray((final_img ).astype(np.uint8)).save('mask.png')
+    img = final_img.astype(np.uint8)
+    ###############################################################################
     
+    img_tensor = img_transforms(img)
+    mask_image=Image.fromarray(redused_seg);mask_image.putpalette(get_palette(len(SEG.ID)));mask_image.save('seg.png')
+    image_image=Image.fromarray((img_tensor.permute([1,2,0]).numpy()*127 + 127).astype(np.uint8));image_image.save('img.png')
+    pose_image=Image.fromarray(_view_pose(torch.Tensor(pose)));pose_image.save('pose.png')
+    Image.blend(Image.blend(mask_image.convert("RGBA"),image_image.convert("RGBA"),0.5), pose_image.convert("RGBA"),0.5).save('input.png')
     return img_tensor, torch.Tensor(pose), torch.Tensor(redused_seg)
+
 
 
 def dress_garment(image_file, garment_file, GARMENT_IDS:List[int]):
@@ -304,9 +327,24 @@ def dress_garment(image_file, garment_file, GARMENT_IDS:List[int]):
     s_img = source_img.permute([1,2,0]).numpy()*127 + 127
     g_img = garment_img.permute([1,2,0]).numpy()*127 + 127
     new_image_arr = np.array(new_image)
-    new_image_arr[source_parse == SEG.ID['face'],:]=s_img[source_parse == SEG.ID['face']]
+
+    ##############################################################################################################
+    # new_image_arr[source_parse == SEG.ID['face'],:]=s_img[source_parse == SEG.ID['face']]
+    bg_kernel = (5, 5)
+    # bg_color = [234,230,224]
+    bg_mask = (source_parse.numpy() == SEG.ID['face']).astype(np.uint8) #Image.fromarray((bg_mask*255).astype(np.uint8)).save('mask.png')
+    eroded_mask = cv2.erode(bg_mask,np.ones(bg_kernel),iterations=1) #Image.fromarray((eroded_mask*255).astype(np.uint8)).save('mask.png')
+    # eroded_mask = cv2.morphologyEx(eroded_mask, cv2.MORPH_OPEN, np.ones(bg_kernel, np.uint8))
+    blurred_mask = cv2.blur(eroded_mask.astype(np.float),bg_kernel,0) #Image.fromarray((blurred_mask*255).astype(np.uint8)).save('mask.png')
+    # blurred_img = cv2.blur(img.astype(np.float),(5,5),0)  #Image.fromarray((blurred_img).astype(np.uint8)).save('mask.png')
+    final_img = new_image_arr * (1-blurred_mask[...,None]) + blurred_mask[...,None] * s_img
+    Image.fromarray((final_img ).astype(np.uint8)).save('mask.png')
+    new_image_arr = final_img.astype(np.uint8)
+
+
     # new_image_arr[source_parse == SEG.ID['hair'],:]=s_img[source_parse == SEG.ID['hair']]
-    Image.fromarray(np.concatenate((new_image_arr,s_img,g_img),1).astype(np.uint8)).save('img.jpg')
+
+    Image.fromarray(np.concatenate((s_img,g_img,new_image_arr),1).astype(np.uint8)).save('img.jpg')
     print('ss')
     return Image.fromarray(new_image_arr)
 
