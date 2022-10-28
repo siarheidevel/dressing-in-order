@@ -46,6 +46,7 @@ def main():
 
     # dataset.load_data('/home/deeplab/datasets/deepfashion/diordataset_custom/img_highres/WOMEN/Tees_Tanks/id_00003241/02_2_side.jpg', do_augm=True)
     # '/home/deeplab/datasets/custom_fashion/data/wildberries_ru_/1743/17430312/17430312-2.jpg'
+    # dataset.load_data('/home/deeplab/datasets/deepfashion/diordataset_custom/img_highres/WOMEN/Dresses/id_00000621/02_2_side.jpg', do_augm=True)
 
     dataset = torch.utils.data.DataLoader(dataset, batch_size=opt.batch_size, shuffle=(opt.phase == 'train'),
         num_workers=opt.n_cpus, pin_memory=True, prefetch_factor=10)

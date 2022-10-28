@@ -109,7 +109,7 @@ class PairDataset(data.Dataset):
         resized_img = cv2.bilateralFilter(cv2.warpAffine(img, affine_transform[:2],dstSize, 
             flags=cv2.INTER_AREA,
             borderMode=cv2.BORDER_CONSTANT, borderValue=(0,0,0)),d=5,sigmaColor=15, sigmaSpace=15).astype(np.uint8)
-        Image.fromarray(resized_img).save('img.png')
+        # Image.fromarray(resized_img).save('img.png')
 
         # Image.fromarray(cv2.bilateralFilter(cv2.warpAffine(img, affine_transform[:2],dstSize, 
         #     flags=cv2.INTER_AREA,
@@ -423,7 +423,7 @@ def _remove_bg(img, bg_mask, bg_color = [255,249,249]):
     bg_kernel = (3, 3)
     # bg_color = [234,230,224]    
     eroded_mask = cv2.dilate(bg_mask,np.ones(bg_kernel),iterations=1) #Image.fromarray((eroded_mask*255).astype(np.uint8)).save('mask.png')
-    eroded_mask = cv2.morphologyEx(eroded_mask, cv2.MORPH_OPEN, np.ones(bg_kernel, np.uint8))
+    eroded_mask = cv2.morphologyEx(eroded_mask, cv2.MORPH_OPEN, np.ones((9,9), np.uint8))
     blurred_mask = cv2.GaussianBlur(eroded_mask.astype(np.float),bg_kernel,0) #Image.fromarray((blurred_mask*255).astype(np.uint8)).save('mask.png')
     # blurred_img = cv2.blur(img.astype(np.float),(5,5),0)  #Image.fromarray((blurred_img).astype(np.uint8)).save('mask.png')
     bg_img = np.ones_like(img)*bg_color
